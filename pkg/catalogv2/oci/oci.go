@@ -119,12 +119,14 @@ func GenerateIndex(ociClient *Client, URL string, credentialSecret *corev1.Secre
 		return nil, err
 	}
 
-	var maxTag *version.Version
+	var maxTag string
 	var chartName string
 
 	// Loop over all the tags and find the latest version
 	tagsFunc := func(tags []string) error {
 		existingTags := make(map[string]bool)
+		var maxSemver *version.Version
+
 		for i := len(tags) - 1; i >= 0; i-- {
 			existingTags[tags[i]] = true
 			// Check if the tag is a valid semver version or not. If yes, then proceed.
@@ -136,8 +138,9 @@ func GenerateIndex(ociClient *Client, URL string, credentialSecret *corev1.Secre
 				continue
 			}
 
-			if maxTag == nil || maxTag.LessThan(semverTag) {
-				maxTag = semverTag
+			if maxSemver == nil || maxSemver.LessThan(semverTag) {
+				maxSemver = semverTag
+				maxTag = tags[i]
 			}
 
 			// Add tags into the helm repo index
@@ -181,7 +184,7 @@ func GenerateIndex(ociClient *Client, URL string, credentialSecret *corev1.Secre
 				}
 				chartName = ociClient.repository[strings.LastIndex(ociClient.repository, "/")+1:]
 				existingCharts[chartName] = true
-				maxTag = nil
+				maxTag = ""
 
 				// call tags to get the max tag and update the indexFile
 				err = orasRepository.Tags(context.Background(), "", tagsFunc)
@@ -189,8 +192,8 @@ func GenerateIndex(ociClient *Client, URL string, credentialSecret *corev1.Secre
 					return fmt.Errorf("failed to fetch tags for repository %s: %w", URL, err)
 				}
 
-				if maxTag != nil {
-					ociClient.tag = maxTag.Original()
+				if maxTag != "" {
+					ociClient.tag = maxTag
 					err = addToHelmRepoIndex(*ociClient, indexFile, orasRepository)
 					if err != nil {
 						// Users can have access to only some repositories and not all.
@@ -200,7 +203,7 @@ func GenerateIndex(ociClient *Client, URL string, credentialSecret *corev1.Secre
 							delete(indexFile.Entries, chartName)
 							logrus.Warnf("failed to add OCI repository %s to helm repo index: %v", ociClient.repository, err)
 						} else {
-							return fmt.Errorf("failed to add tag %s in OCI repository %s to helm repo index: %w", maxTag.String(), ociClient.repository, err)
+							return fmt.Errorf("failed to add tag %s in OCI repository %s to helm repo index: %w", maxTag, ociClient.repository, err)
 						}
 					}
 				}
@@ -243,13 +246,13 @@ func GenerateIndex(ociClient *Client, URL string, credentialSecret *corev1.Secre
 			return nil, fmt.Errorf("failed to fetch tags for repository %s: %w", URL, err)
 		}
 
-		if maxTag != nil {
-			ociClient.tag = maxTag.Original()
+		if maxTag != "" {
+			ociClient.tag = maxTag
 
 			// fetch the chart.yaml for the latest tag and add it to the index.
 			err = addToHelmRepoIndex(*ociClient, indexFile, orasRepository)
 			if err != nil {
-				return indexFile, fmt.Errorf("failed to add tag %s in OCI repository %s to helm repo index: %w", maxTag.String(), ociClient.repository, err)
+				return indexFile, fmt.Errorf("failed to add tag %s in OCI repository %s to helm repo index: %w", maxTag, ociClient.repository, err)
 			}
 		}
 		// If no repository and tag is provided, we fetch
